@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Black & White Tennis</title>
+    <!-- Include PeerJS for Online Multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 600px;
+            height: 800px;
+        }
+
+        canvas {
+            display: block;
+            background-color: #000;
+            border: 4px solid #fff;
+            box-sizing: border-box;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+        }
+
+        /* UI Overlays */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        h1 {
+            font-size: 48px;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        h2 {
+            font-size: 32px;
+            margin-bottom: 30px;
+        }
+
+        .instructions {
+            text-align: center;
+            max-width: 80%;
+            margin-bottom: 30px;
+            font-size: 14px;
+            line-height: 1.6;
+            border: 1px dashed #fff;
+            padding: 15px;
+        }
+
+        .controls-grid {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            margin-top: 15px;
+        }
+
+        .btn {
+            background: #000;
+            color: #fff;
+            border: 2px solid #fff;
+            padding: 15px 30px;
+            font-size: 18px;
+            font-family: 'Courier New', Courier, monospace;
+            text-transform: uppercase;
+            cursor: pointer;
+            margin: 8px;
+            transition: all 0.2s ease;
+            width: 280px;
+        }
+
+        .btn:hover {
+            background: #fff;
+            color: #000;
+        }
+
+        .input-field {
+            background: #000;
+            color: #fff;
+            border: 2px solid #fff;
+            padding: 15px;
+            font-size: 18px;
+            font-family: 'Courier New', Courier, monospace;
+            text-align: center;
+            margin-bottom: 20px;
+            width: 250px;
+        }
+
+        .input-field:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .peer-id-display {
+            font-size: 24px;
+            background: #fff;
+            color: #000;
+            padding: 10px 20px;
+            margin: 20px 0;
+            font-weight: bold;
+            user-select: text;
+        }
+
+        /* CRT Scanline effect purely for aesthetic */
+        #game-container::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 2;
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="600" height="800"></canvas>
+
+    <!-- Main Menu -->
+    <div id="main-menu" class="overlay">
+        <h1>B&W Tennis</h1>
+        <div class="instructions">
+            <p><strong>RULE:</strong> You can only swing ONCE when the ball is on your side.</p>
+            <p>Timing is everything. Wait until it's in front of you!</p>
+            <div class="controls-grid">
+                <div>
+                    <strong>PLAYER 1 (Bottom)</strong><br>
+                    Move: W A S D<br>
+                    Swing: SPACE
+                </div>
+                <div>
+                    <strong>PLAYER 2 / AI (Top)</strong><br>
+                    Move: ARROWS<br>
+                    Swing: ENTER
+                </div>
+            </div>
+        </div>
+        <button class="btn" onclick="startGame(0)">Vs Player (Local)</button>
+        <button class="btn" onclick="showHostMenu()">Host Online Game</button>
+        <button class="btn" onclick="showJoinMenu()">Join Online Game</button>
+        <button class="btn" onclick="startGame(1)">Vs AI (Easy)</button>
+        <button class="btn" onclick="startGame(2)">Vs AI (Medium)</button>
+        <button class="btn" onclick="startGame(3)">Vs AI (Hard)</button>
+    </div>
+
+    <!-- Host Menu -->
+    <div id="host-menu" class="overlay hidden">
+        <h2>Host a Game</h2>
+        <p>Share this Room ID with your friend:</p>
+        <div class="peer-id-display" id="my-peer-id">Generating...</div>
+        <p>Waiting for connection...</p>
+        <button class="btn" onclick="cancelOnline()">Cancel</button>
+    </div>
+
+    <!-- Join Menu -->
+    <div id="join-menu" class="overlay hidden">
+        <h2>Join a Game</h2>
+        <p>Enter your friend's Room ID:</p>
+        <input type="text" id="target-peer-id" class="input-field" placeholder="Room ID" autocomplete="off">
+        <p id="join-status"></p>
+        <button class="btn" onclick="connectToHost()">Connect</button>
+        <button class="btn" onclick="cancelOnline()">Cancel</button>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over" class="overlay hidden">
+        <h1 id="winner-text">Player 1 Wins!</h1>
+        <button class="btn" onclick="returnToMenu()">Main Menu</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // UI Elements
+    const mainMenu = document.getElementById('main-menu');
+    const hostMenu = document.getElementById('host-menu');
+    const joinMenu = document.getElementById('join-menu');
+    const gameOverMenu = document.getElementById('game-over');
+    const winnerText = document.getElementById('winner-text');
+
+    // Game States
+    let gameState = 'menu'; // menu, playing, gameover
+    let aiMode = 0; // 0=PvP, 1=Easy, 2=Med, 3=Hard, 4=Host, 5=Guest
+    let currentWinner = 0;
+
+    // Online Multiplayer Variables
+    let peer = null;
+    let conn = null;
+    let isOnline = false;
+    let isHost = false;
+    let guestKeys = {}; // Received keys from the guest player
+
+    // Tennis Scoring: 0, 15, 30, 40, Game.
+    const scoreStrings = ["0", "15", "30", "40", "ADV"];
+    let p1Points = 0;
+    let p2Points = 0;
+    let server = 1;
+
+    // Input Tracking
+    const keys = {};
+
+    window.addEventListener('keydown', (e) => {
+        keys[e.code] = true;
+        
+        // Prevent default scrolling
+        if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].indexOf(e.code) > -1) {
+            e.preventDefault();
+        }
+
+        if (gameState === 'playing') {
+            // Local & Host Input
+            if (aiMode !== 5) {
+                if (e.code === 'Space' && !p1.hasSwung) attemptSwing(p1, 1);
+                if (e.code === 'Enter' && !p2.hasSwung && (aiMode === 0)) attemptSwing(p2, 2);
+            }
+
+            // Guest Input Syncing
+            if (isOnline && !isHost) {
+                if (conn && conn.open) {
+                    conn.send({ type: 'keys', keys: keys });
+                    if (e.code === 'Enter') conn.send({ type: 'swing' }); // Immediate swing event
+                }
+            }
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        keys[e.code] = false;
+
+        // Guest Input Syncing
+        if (isOnline && !isHost && gameState === 'playing') {
+            if (conn && conn.open) conn.send({ type: 'keys', keys: keys });
+        }
+    });
+
+    // Entities
+    let ball = {
+        x: 300, y: 400, r: 8,
+        vx: 0, vy: 0,
+        active: false,
+        timer: 0
+    };
+
+    let p1 = {
+        x: 260, y: 700, w: 80, h: 15,
+        baseSpeed: 5,
+        hasSwung: false,
+        swingFrames: 0
+    };
+
+    let p2 = {
+        x: 260, y: 85, w: 80, h: 15,
+        baseSpeed: 5,
+        hasSwung: false,
+        swingFrames: 0
+    };
+
+    // --- PeerJS Networking Logic ---
+
+    function showHostMenu() {
+        mainMenu.classList.add('hidden');
+        hostMenu.classList.remove('hidden');
+        document.getElementById('my-peer-id').innerText = "Generating...";
+        
+        peer = new Peer();
+        peer.on('open', (id) => {
+            document.getElementById('my-peer-id').innerText = id;
+        });
+
+        peer.on('connection', (connection) => {
+            conn = connection;
+            setupCommonConnectionEvents();
+            
+            conn.on('data', (data) => {
+                if (data.type === 'keys') guestKeys = data.keys;
+                if (data.type === 'swing') attemptSwing(p2, 2);
+            });
+
+            isOnline = true;
+            isHost = true;
+            hostMenu.classList.add('hidden');
+            startGame(4); // Start as Host
+        });
+
+        peer.on('error', (err) => {
+            alert("Connection error: " + err);
+            cancelOnline();
+        });
+    }
+
+    function showJoinMenu() {
+        mainMenu.classList.add('hidden');
+        joinMenu.classList.remove('hidden');
+        document.getElementById('join-status').innerText = "";
+        peer = new Peer();
+    }
+
+    function connectToHost() {
+        const targetId = document.getElementById('target-peer-id').value.trim();
+        if (!targetId) return;
+        
+        document.getElementById('join-status').innerText = "Connecting...";
+        conn = peer.connect(targetId);
+        
+        conn.on('open', () => {
+            setupCommonConnectionEvents();
+
+            conn.on('data', (data) => {
+                if (data.type === 'state') {
+                    // Overwrite local state entirely with authoritative host state
+                    ball = data.state.ball;
+                    p1 = data.state.p1;
+                    p2 = data.state.p2;
+                    p1Points = data.state.p1Points;
+                    p2Points = data.state.p2Points;
+                    server = data.state.server;
+                    
+                    if (data.state.gameState === 'gameover' && gameState !== 'gameover') {
+                        endGame(data.state.winner);
+                    } else if (data.state.gameState === 'playing' && gameState === 'gameover') {
+                        // Host restarted the game
+                        gameOverMenu.classList.add('hidden');
+                        gameState = 'playing';
+                    } else {
+                        gameState = data.state.gameState;
+                    }
+                }
+            });
+
+            isOnline = true;
+            isHost = false;
+            joinMenu.classList.add('hidden');
+            startGame(5); // Start as Guest
+        });
+
+        conn.on('error', (err) => {
+            document.getElementById('join-status').innerText = "Connection failed.";
+        });
+    }
+
+    function setupCommonConnectionEvents() {
+        conn.on('close', () => {
+            alert("Player disconnected.");
+            returnToMenu();
+        });
+    }
+
+    function cancelOnline() {
+        if (conn) { conn.close(); conn = null; }
+        if (peer) { peer.destroy(); peer = null; }
+        isOnline = false;
+        isHost = false;
+        hostMenu.classList.add('hidden');
+        joinMenu.classList.add('hidden');
+        mainMenu.classList.remove('hidden');
+    }
+
+    // --- Core Game Functions ---
+
+    function startGame(mode) {
+        aiMode = mode;
+        p1Points = 0;
+        p2Points = 0;
+        server = 1;
+        currentWinner = 0;
+        
+        // Reset inputs
+        for(let k in keys) keys[k] = false;
+        guestKeys = {};
+
+        // Adjust AI base speeds based on difficulty
+        if (aiMode === 1) p2.baseSpeed = 3;
+        else if (aiMode === 2) p2.baseSpeed = 4.5;
+        else if (aiMode === 3) p2.baseSpeed = 6;
+        else p2.baseSpeed = 5; // PvP, Host, or Guest
+
+        mainMenu.classList.add('hidden');
+        gameOverMenu.classList.add('hidden');
+        gameState = 'playing';
+        
+        if (aiMode !== 5) {
+            resetRound();
+        }
+    }
+
+    function returnToMenu() {
+        cancelOnline(); // Cleans up peer connections if they exist
+        gameOverMenu.classList.add('hidden');
+        mainMenu.classList.remove('hidden');
+        gameState = 'menu';
+    }
+
+    function resetRound() {
+        p1.hasSwung = false;
+        p2.hasSwung = false;
+        p1.swingFrames = 0;
+        p2.swingFrames = 0;
+        
+        p1.x = canvas.width / 2 - p1.w / 2;
+        p1.y = 700;
+        p2.x = canvas.width / 2 - p2.w / 2;
+        p2.y = 85;
+
+        ball.active = false;
+        ball.timer = 60; 
+        
+        ball.x = server === 1 ? p1.x + p1.w/2 : p2.x + p2.w/2;
+        ball.y = server === 1 ? p1.y - 20 : p2.y + p2.h + 20;
+    }
+
+    function launchServe() {
+        ball.active = true;
+        ball.vy = server === 1 ? -6 : 6;
+        ball.vx = (Math.random() - 0.5) * 4;
+    }
+
+    function scorePoint(winner) {
+        if (winner === 1) {
+            if (p1Points === 3 && p2Points === 3) p1Points = 4; // ADV
+            else if (p1Points === 4) endGame(1);
+            else if (p2Points === 4) p2Points = 3; // Deuce Drop
+            else if (p1Points === 3 && p2Points < 3) endGame(1);
+            else p1Points++;
+        } else {
+            if (p2Points === 3 && p1Points === 3) p2Points = 4; // ADV
+            else if (p2Points === 4) endGame(2);
+            else if (p1Points === 4) p1Points = 3; // Deuce Drop
+            else if (p2Points === 3 && p1Points < 3) endGame(2);
+            else p2Points++;
+        }
+
+        server = winner === 1 ? 2 : 1; 
+        
+        if (gameState === 'playing') {
+            resetRound();
+        }
+    }
+
+    function endGame(winner) {
+        gameState = 'gameover';
+        currentWinner = winner;
+        winnerText.innerText = `Player ${winner} Wins!`;
+        if (aiMode > 0 && aiMode < 4 && winner === 2) winnerText.innerText = "AI Wins!";
+        gameOverMenu.classList.remove('hidden');
+    }
+
+    function attemptSwing(player, playerNum) {
+        player.hasSwung = true;
+        player.swingFrames = 15;
+
+        if (!ball.active) return;
+
+        let hitBoxYStart, hitBoxYEnd;
+        
+        if (playerNum === 1) {
+            hitBoxYStart = player.y - 25; 
+            hitBoxYEnd = player.y + player.h;
+        } else {
+            hitBoxYStart = player.y;
+            hitBoxYEnd = player.y + player.h + 25; 
+        }
+
+        const inX = ball.x + ball.r > player.x && ball.x - ball.r < player.x + player.w;
+        const inY = ball.y + ball.r > hitBoxYStart && ball.y - ball.r < hitBoxYEnd;
+
+        if (inX && inY) {
+            let relativeIntersect = (ball.x - (player.x + player.w / 2)) / (player.w / 2);
+            ball.vx = relativeIntersect * 7; 
+
+            ball.vy = (playerNum === 1) ? -Math.abs(ball.vy) : Math.abs(ball.vy);
+            ball.vy *= 1.1;
+            
+            if (ball.vy > 12) ball.vy = 12;
+            if (ball.vy < -12) ball.vy = -12;
+        }
+    }
+
+    // --- Update Logic ---
+
+    function update() {
+        if (gameState !== 'playing') return;
+
+        // If Guest, skip physical updates (controlled by host sync)
+        if (isOnline && !isHost) {
+            if (p1.swingFrames > 0) p1.swingFrames--;
+            if (p2.swingFrames > 0) p2.swingFrames--;
+            return;
+        }
+
+        // Serve Delay
+        if (!ball.active) {
+            ball.timer--;
+            if (ball.timer <= 0) launchServe();
+        }
+
+        // --- PLAYER 1 MOVEMENT ---
+        if (keys['KeyA']) p1.x -= p1.baseSpeed;
+        if (keys['KeyD']) p1.x += p1.baseSpeed;
+        if (keys['KeyW']) p1.y -= p1.baseSpeed;
+        if (keys['KeyS']) p1.y += p1.baseSpeed;
+
+        p1.x = Math.max(0, Math.min(canvas.width - p1.w, p1.x));
+        p1.y = Math.max(canvas.height / 2 + 20, Math.min(canvas.height - p1.h - 10, p1.y));
+
+        // --- PLAYER 2 MOVEMENT / AI ---
+        if (aiMode === 0 || aiMode === 4) { // Local PvP or Online Host
+            let p2Input = (aiMode === 4) ? guestKeys : keys;
+            if (p2Input['ArrowLeft']) p2.x -= p2.baseSpeed;
+            if (p2Input['ArrowRight']) p2.x += p2.baseSpeed;
+            if (p2Input['ArrowUp']) p2.y -= p2.baseSpeed;
+            if (p2Input['ArrowDown']) p2.y += p2.baseSpeed;
+        } else {
+            // AI Logic
+            if (ball.active) {
+                let targetX = ball.x - p2.w / 2;
+                if (aiMode === 1) targetX += Math.sin(Date.now() / 300) * 40; 
+
+                if (p2.x < targetX - 5) p2.x += p2.baseSpeed;
+                else if (p2.x > targetX + 5) p2.x -= p2.baseSpeed;
+
+                let targetY = 85;
+                if (ball.vy < 0 && ball.y < canvas.height / 2) targetY = 120;
+                
+                if (p2.y < targetY - 5) p2.y += p2.baseSpeed * 0.5;
+                else if (p2.y > targetY + 5) p2.y -= p2.baseSpeed * 0.5;
+
+                // AI Hitting
+                if (ball.vy < 0 && !p2.hasSwung) {
+                    let distY = ball.y - (p2.y + p2.h);
+                    let triggerDist = 15; 
+                    if (aiMode === 1) triggerDist = 15 + (Math.random() * 50 - 25);
+                    if (aiMode === 2) triggerDist = 15 + (Math.random() * 20 - 10);
+                    if (aiMode === 3) triggerDist = 10; 
+
+                    if (distY < triggerDist && distY > -10) {
+                        if (Math.abs(ball.x - (p2.x + p2.w/2)) < p2.w/2 + 30) attemptSwing(p2, 2);
+                        else if (aiMode === 1 && Math.random() < 0.1) attemptSwing(p2, 2);
+                    }
+                }
+            }
+        }
+
+        p2.x = Math.max(0, Math.min(canvas.width - p2.w, p2.x));
+        p2.y = Math.max(10, Math.min(canvas.height / 2 - p2.h - 20, p2.y));
+
+        // --- BALL PHYSICS ---
+        if (ball.active) {
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            // Wall bounces
+            if (ball.x - ball.r < 0) {
+                ball.x = ball.r;
+                ball.vx *= -1;
+            } else if (ball.x + ball.r > canvas.width) {
+                ball.x = canvas.width - ball.r;
+                ball.vx *= -1;
+            }
+
+            // Scoring
+            if (ball.y < 0) scorePoint(1); 
+            else if (ball.y > canvas.height) scorePoint(2); 
+
+            // Reset swings
+            if (ball.vy > 0 && ball.y > canvas.height / 2 && ball.y - ball.vy <= canvas.height / 2) {
+                p1.hasSwung = false; 
+            }
+            if (ball.vy < 0 && ball.y < canvas.height / 2 && ball.y - ball.vy >= canvas.height / 2) {
+                p2.hasSwung = false; 
+            }
+        }
+
+        if (p1.swingFrames > 0) p1.swingFrames--;
+        if (p2.swingFrames > 0) p2.swingFrames--;
+
+        // --- BROADCAST STATE (If Host) ---
+        if (isOnline && isHost && conn && conn.open) {
+            conn.send({
+                type: 'state',
+                state: {
+                    ball: { ...ball },
+                    p1: { ...p1 },
+                    p2: { ...p2 },
+                    p1Points: p1Points,
+                    p2Points: p2Points,
+                    server: server,
+                    gameState: gameState,
+                    winner: currentWinner
+                }
+            });
+        }
+    }
+
+    // --- Render Logic ---
+
+    function draw() {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        
+        ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+        
+        ctx.setLineDash([10, 15]);
+        ctx.beginPath();
+        ctx.moveTo(20, canvas.height / 2);
+        ctx.lineTo(canvas.width - 20, canvas.height / 2);
+        ctx.stroke();
+        ctx.setLineDash([]); 
+
+        ctx.beginPath();
+        ctx.moveTo(canvas.width / 2, 20);
+        ctx.lineTo(canvas.width / 2, canvas.height - 20);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(20, canvas.height / 4);
+        ctx.lineTo(canvas.width - 20, canvas.height / 4);
+        ctx.moveTo(20, canvas.height * 0.75);
+        ctx.lineTo(canvas.width - 20, canvas.height * 0.75);
+        ctx.stroke();
+
+        ctx.font = '40px "Courier New"';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; 
+        ctx.textAlign = 'right';
+        ctx.fillText(scoreStrings[p2Points], canvas.width - 30, canvas.height / 2 - 30);
+        ctx.fillText(scoreStrings[p1Points], canvas.width - 30, canvas.height / 2 + 60);
+
+        // Indicate top player view locally for online
+        if (isOnline) {
+            ctx.font = '16px "Courier New"';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.textAlign = 'left';
+            if (isHost) {
+                 ctx.fillText("YOU (HOST)", 25, canvas.height - 25);
+                 ctx.fillText("GUEST", 25, 40);
+            } else {
+                 ctx.fillText("YOU (GUEST)", 25, 40);
+                 ctx.fillText("HOST", 25, canvas.height - 25);
+            }
+        }
+
+        drawPlayer(p1);
+        drawPlayer(p2);
+
+        if (ball.active || (Math.floor(Date.now() / 200) % 2 === 0)) { 
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function drawPlayer(p) {
+        if (p.swingFrames > 0) {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(p.x, p.y, p.w, p.h);
+        } else {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(p.x, p.y, p.w, p.h);
+        }
+        
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(p.x, p.y, p.w, p.h);
+
+        if (p.hasSwung && p.swingFrames === 0) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(p.x + 3, p.y + 3, p.w - 6, p.h - 6);
+            ctx.setLineDash([]);
+        }
+    }
+
+    // --- Game Loop ---
+    function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
