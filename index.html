@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>tennis game</title>
+    <title>Black & White Tennis</title>
     <!-- Include PeerJS for Online Multiplayer -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
@@ -153,7 +153,7 @@
 
     <!-- Main Menu -->
     <div id="main-menu" class="overlay">
-        <h1>tennis game</h1>
+        <h1>B&W Tennis</h1>
         <div class="instructions">
             <p><strong>RULE:</strong> You can only swing ONCE when the ball is on your side.</p>
             <p>Timing is everything. Wait until it's in front of you!</p>
@@ -168,6 +168,10 @@
                     Move: ARROWS<br>
                     Swing: ENTER
                 </div>
+            </div>
+            <div style="margin-top: 15px;">
+                <label for="match-length" style="font-size: 16px; font-weight: bold;">Points to Win:</label>
+                <input type="number" id="match-length" class="input-field" style="width: 70px; padding: 5px; margin: 0 0 0 10px;" value="4" min="1" max="99">
             </div>
         </div>
         <button class="btn" onclick="startGame(0)">Vs Player (Local)</button>
@@ -225,44 +229,64 @@
     let conn = null;
     let isOnline = false;
     let isHost = false;
-    let guestKeys = {}; // Received keys from the guest player
+    let guestKeys = {}; 
 
-    // Tennis Scoring: 0, 15, 30, 40, Game.
-    const scoreStrings = ["0", "15", "30", "40", "ADV"];
+    // Tennis Scoring
     let p1Points = 0;
     let p2Points = 0;
     let server = 1;
+    let matchLength = 4;
 
-    // Input Tracking
+    function getScoreDisplay(myPoints, oppPoints, length) {
+        if (length === 1) return myPoints.toString();
+
+        // If both players are 1 point away from winning, use Deuce/Adv logic
+        if (myPoints >= length - 1 && oppPoints >= length - 1) {
+            if (myPoints === oppPoints) return "DEUCE";
+            if (myPoints > oppPoints) return "ADV";
+            return "-";
+        }
+        // If standard 4-point tennis game, use classic strings
+        if (length === 4 && myPoints < 4) {
+            return ["0", "15", "30", "40"][myPoints];
+        }
+        return myPoints.toString();
+    }
+
+    // Input Tracking (using normalized .key properties for safety across sandboxes)
     const keys = {};
 
     window.addEventListener('keydown', (e) => {
-        keys[e.code] = true;
+        if (!e.key) return;
+        const key = e.key.toLowerCase();
+        keys[key] = true;
         
-        // Prevent default scrolling
-        if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].indexOf(e.code) > -1) {
+        // Prevent default scrolling for game controls
+        if([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) {
             e.preventDefault();
         }
 
         if (gameState === 'playing') {
             // Local & Host Input
             if (aiMode !== 5) {
-                if (e.code === 'Space' && !p1.hasSwung) attemptSwing(p1, 1);
-                if (e.code === 'Enter' && !p2.hasSwung && (aiMode === 0)) attemptSwing(p2, 2);
+                if (key === ' ' && !p1.hasSwung) attemptSwing(p1, 1);
+                if (key === 'enter' && !p2.hasSwung && (aiMode === 0)) attemptSwing(p2, 2);
             }
 
             // Guest Input Syncing
             if (isOnline && !isHost) {
                 if (conn && conn.open) {
                     conn.send({ type: 'keys', keys: keys });
-                    if (e.code === 'Enter') conn.send({ type: 'swing' }); // Immediate swing event
+                    if (key === 'enter') conn.send({ type: 'swing' }); 
                 }
             }
         }
     });
 
     window.addEventListener('keyup', (e) => {
-        keys[e.code] = false;
+        if (!e.key) return;
+        const key = e.key.toLowerCase();
+        keys[key] = false;
 
         // Guest Input Syncing
         if (isOnline && !isHost && gameState === 'playing') {
@@ -299,7 +323,9 @@
         hostMenu.classList.remove('hidden');
         document.getElementById('my-peer-id').innerText = "Generating...";
         
-        peer = new Peer();
+        peer = new Peer({
+            config: {'iceServers': [{ urls: 'stun:stun.l.google.com:19302' }]}
+        });
         peer.on('open', (id) => {
             document.getElementById('my-peer-id').innerText = id;
         });
@@ -316,7 +342,7 @@
             isOnline = true;
             isHost = true;
             hostMenu.classList.add('hidden');
-            startGame(4); // Start as Host
+            startGame(4); 
         });
 
         peer.on('error', (err) => {
@@ -329,49 +355,62 @@
         mainMenu.classList.add('hidden');
         joinMenu.classList.remove('hidden');
         document.getElementById('join-status').innerText = "";
-        peer = new Peer();
+        // Wait to create peer until user clicks connect
     }
 
     function connectToHost() {
         const targetId = document.getElementById('target-peer-id').value.trim();
         if (!targetId) return;
         
-        document.getElementById('join-status').innerText = "Connecting...";
-        conn = peer.connect(targetId);
+        document.getElementById('join-status').innerText = "Connecting to network...";
         
-        conn.on('open', () => {
-            setupCommonConnectionEvents();
-
-            conn.on('data', (data) => {
-                if (data.type === 'state') {
-                    // Overwrite local state entirely with authoritative host state
-                    ball = data.state.ball;
-                    p1 = data.state.p1;
-                    p2 = data.state.p2;
-                    p1Points = data.state.p1Points;
-                    p2Points = data.state.p2Points;
-                    server = data.state.server;
-                    
-                    if (data.state.gameState === 'gameover' && gameState !== 'gameover') {
-                        endGame(data.state.winner);
-                    } else if (data.state.gameState === 'playing' && gameState === 'gameover') {
-                        // Host restarted the game
-                        gameOverMenu.classList.add('hidden');
-                        gameState = 'playing';
-                    } else {
-                        gameState = data.state.gameState;
-                    }
-                }
-            });
-
-            isOnline = true;
-            isHost = false;
-            joinMenu.classList.add('hidden');
-            startGame(5); // Start as Guest
+        peer = new Peer({
+            config: {'iceServers': [{ urls: 'stun:stun.l.google.com:19302' }]}
         });
 
-        conn.on('error', (err) => {
-            document.getElementById('join-status').innerText = "Connection failed.";
+        peer.on('open', () => {
+            document.getElementById('join-status').innerText = "Connecting to host...";
+            conn = peer.connect(targetId);
+            
+            conn.on('open', () => {
+                setupCommonConnectionEvents();
+
+                conn.on('data', (data) => {
+                    if (data.type === 'state') {
+                        // Overwrite local state entirely with authoritative host state
+                        ball = data.state.ball;
+                        p1 = data.state.p1;
+                        p2 = data.state.p2;
+                        p1Points = data.state.p1Points;
+                        p2Points = data.state.p2Points;
+                        server = data.state.server;
+                        matchLength = data.state.matchLength;
+                        
+                        if (data.state.gameState === 'gameover' && gameState !== 'gameover') {
+                            endGame(data.state.winner);
+                        } else if (data.state.gameState === 'playing' && gameState === 'gameover') {
+                            // Host restarted the game
+                            gameOverMenu.classList.add('hidden');
+                            gameState = 'playing';
+                        } else {
+                            gameState = data.state.gameState;
+                        }
+                    }
+                });
+
+                isOnline = true;
+                isHost = false;
+                joinMenu.classList.add('hidden');
+                startGame(5); 
+            });
+
+            conn.on('error', (err) => {
+                document.getElementById('join-status').innerText = "Connection failed.";
+            });
+        });
+
+        peer.on('error', (err) => {
+            document.getElementById('join-status').innerText = "Network error: " + err;
         });
     }
 
@@ -401,7 +440,12 @@
         server = 1;
         currentWinner = 0;
         
-        // Reset inputs
+        if (mode !== 5) { // If host or local, set match length
+            matchLength = parseInt(document.getElementById('match-length').value) || 4;
+            if (matchLength < 1) matchLength = 1;
+        }
+
+        // Reset inputs completely
         for(let k in keys) keys[k] = false;
         guestKeys = {};
 
@@ -409,11 +453,14 @@
         if (aiMode === 1) p2.baseSpeed = 3;
         else if (aiMode === 2) p2.baseSpeed = 4.5;
         else if (aiMode === 3) p2.baseSpeed = 6;
-        else p2.baseSpeed = 5; // PvP, Host, or Guest
+        else p2.baseSpeed = 5; 
 
         mainMenu.classList.add('hidden');
         gameOverMenu.classList.add('hidden');
         gameState = 'playing';
+        
+        // Give canvas focus to ensure key presses are read 
+        window.focus(); 
         
         if (aiMode !== 5) {
             resetRound();
@@ -421,7 +468,7 @@
     }
 
     function returnToMenu() {
-        cancelOnline(); // Cleans up peer connections if they exist
+        cancelOnline(); 
         gameOverMenu.classList.add('hidden');
         mainMenu.classList.remove('hidden');
         gameState = 'menu';
@@ -453,23 +500,23 @@
 
     function scorePoint(winner) {
         if (winner === 1) {
-            if (p1Points === 3 && p2Points === 3) p1Points = 4; // ADV
-            else if (p1Points === 4) endGame(1);
-            else if (p2Points === 4) p2Points = 3; // Deuce Drop
-            else if (p1Points === 3 && p2Points < 3) endGame(1);
-            else p1Points++;
+            p1Points++;
         } else {
-            if (p2Points === 3 && p1Points === 3) p2Points = 4; // ADV
-            else if (p2Points === 4) endGame(2);
-            else if (p1Points === 4) p1Points = 3; // Deuce Drop
-            else if (p2Points === 3 && p1Points < 3) endGame(2);
-            else p2Points++;
+            p2Points++;
         }
 
-        server = winner === 1 ? 2 : 1; 
-        
-        if (gameState === 'playing') {
-            resetRound();
+        let requiredMargin = matchLength === 1 ? 1 : 2;
+
+        // Check win condition
+        if (p1Points >= matchLength && p1Points - p2Points >= requiredMargin) {
+            endGame(1);
+        } else if (p2Points >= matchLength && p2Points - p1Points >= requiredMargin) {
+            endGame(2);
+        } else {
+            server = winner === 1 ? 2 : 1; 
+            if (gameState === 'playing') {
+                resetRound();
+            }
         }
     }
 
@@ -531,10 +578,10 @@
         }
 
         // --- PLAYER 1 MOVEMENT ---
-        if (keys['KeyA']) p1.x -= p1.baseSpeed;
-        if (keys['KeyD']) p1.x += p1.baseSpeed;
-        if (keys['KeyW']) p1.y -= p1.baseSpeed;
-        if (keys['KeyS']) p1.y += p1.baseSpeed;
+        if (keys['a']) p1.x -= p1.baseSpeed;
+        if (keys['d']) p1.x += p1.baseSpeed;
+        if (keys['w']) p1.y -= p1.baseSpeed;
+        if (keys['s']) p1.y += p1.baseSpeed;
 
         p1.x = Math.max(0, Math.min(canvas.width - p1.w, p1.x));
         p1.y = Math.max(canvas.height / 2 + 20, Math.min(canvas.height - p1.h - 10, p1.y));
@@ -542,24 +589,25 @@
         // --- PLAYER 2 MOVEMENT / AI ---
         if (aiMode === 0 || aiMode === 4) { // Local PvP or Online Host
             let p2Input = (aiMode === 4) ? guestKeys : keys;
-            if (p2Input['ArrowLeft']) p2.x -= p2.baseSpeed;
-            if (p2Input['ArrowRight']) p2.x += p2.baseSpeed;
-            if (p2Input['ArrowUp']) p2.y -= p2.baseSpeed;
-            if (p2Input['ArrowDown']) p2.y += p2.baseSpeed;
+            if (p2Input['arrowleft']) p2.x -= p2.baseSpeed;
+            if (p2Input['arrowright']) p2.x += p2.baseSpeed;
+            if (p2Input['arrowup']) p2.y -= p2.baseSpeed;
+            if (p2Input['arrowdown']) p2.y += p2.baseSpeed;
         } else {
             // AI Logic
             if (ball.active) {
                 let targetX = ball.x - p2.w / 2;
                 if (aiMode === 1) targetX += Math.sin(Date.now() / 300) * 40; 
-
-                if (p2.x < targetX - 5) p2.x += p2.baseSpeed;
-                else if (p2.x > targetX + 5) p2.x -= p2.baseSpeed;
+                
+                // Keep movement bounds safe
+                if (p2.x < targetX - p2.baseSpeed) p2.x += p2.baseSpeed;
+                else if (p2.x > targetX + p2.baseSpeed) p2.x -= p2.baseSpeed;
 
                 let targetY = 85;
                 if (ball.vy < 0 && ball.y < canvas.height / 2) targetY = 120;
                 
-                if (p2.y < targetY - 5) p2.y += p2.baseSpeed * 0.5;
-                else if (p2.y > targetY + 5) p2.y -= p2.baseSpeed * 0.5;
+                if (p2.y < targetY - p2.baseSpeed * 0.5) p2.y += p2.baseSpeed * 0.5;
+                else if (p2.y > targetY + p2.baseSpeed * 0.5) p2.y -= p2.baseSpeed * 0.5;
 
                 // AI Hitting
                 if (ball.vy < 0 && !p2.hasSwung) {
@@ -580,10 +628,16 @@
         p2.x = Math.max(0, Math.min(canvas.width - p2.w, p2.x));
         p2.y = Math.max(10, Math.min(canvas.height / 2 - p2.h - 20, p2.y));
 
+        // Defensive guard to ensure physics doesn't crash Canvas rendering context
+        if(isNaN(p1.x)) p1.x = 260;
+        if(isNaN(p2.x)) p2.x = 260;
+
         // --- BALL PHYSICS ---
         if (ball.active) {
             ball.x += ball.vx;
             ball.y += ball.vy;
+            
+            if(isNaN(ball.x) || isNaN(ball.y)) { ball.x = 300; ball.y = 400; }
 
             // Wall bounces
             if (ball.x - ball.r < 0) {
@@ -621,6 +675,7 @@
                     p1Points: p1Points,
                     p2Points: p2Points,
                     server: server,
+                    matchLength: matchLength,
                     gameState: gameState,
                     winner: currentWinner
                 }
@@ -661,8 +716,8 @@
         ctx.font = '40px "Courier New"';
         ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; 
         ctx.textAlign = 'right';
-        ctx.fillText(scoreStrings[p2Points], canvas.width - 30, canvas.height / 2 - 30);
-        ctx.fillText(scoreStrings[p1Points], canvas.width - 30, canvas.height / 2 + 60);
+        ctx.fillText(getScoreDisplay(p2Points, p1Points, matchLength), canvas.width - 30, canvas.height / 2 - 30);
+        ctx.fillText(getScoreDisplay(p1Points, p2Points, matchLength), canvas.width - 30, canvas.height / 2 + 60);
 
         // Indicate top player view locally for online
         if (isOnline) {
